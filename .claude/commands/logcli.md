@@ -84,7 +84,29 @@ fi
 - 如果登录失败（返回非 JSON 或空 token），向用户索要 token 并手动写入缓存文件
 - 如果登录凭据过期，提示用户提供新的凭据
 
-### 2. 构建 logcli 查询（带重试）
+### 2.5 容器发现（当容器名不确定时）
+
+当用户未提供精确容器名，或只给了服务关键词（如"zlmediakit"、"alarm"），或首次查询返回空结果时，**先执行 `series` 查询发现 namespace 下的实际容器列表**：
+
+```bash
+# 列出 namespace 下所有容器（去重）
+logcli --org-id=$ORG_ID --bearer-token=$TOKEN --addr=$LOKI_ADDR \
+  series --from="$FROM+08:00" --to="$TO+08:00" \
+  "{namespace=\"$NAMESPACE\"}" 2>/dev/null \
+  | grep -oP 'container="[^"]*"' | sort -u
+```
+
+**使用场景：**
+- 用户说"查 zlmediakit 日志"但容器实际叫 `zl`（sidecar 模式，pod 名与容器名不同）
+- 用户只给了 namespace，需要确认目标容器
+- 首次查询返回空 → 先确认容器名是否正确再排查其他原因
+
+**注意：**
+- 一个 Pod 可能包含多个容器（如 `eq-rcd-zl-proxy-0` 同时有 `eq-rcd-zl-proxy` 和 `zl` 两个容器）
+- 可用 `pod="xxx"` 进一步过滤：`'{namespace="test01",pod="eq-rcd-zl-proxy-0"}'` 查看该 Pod 的所有容器
+- series 查询很轻量，优先执行不会浪费时间
+
+### 3. 构建 logcli 查询（带重试）
 
 执行 logcli 查询时，必须使用以下重试逻辑（最多重试 3 次，间隔 3 秒）。如果 3 次都失败，**立即停止并告知用户 Loki 服务不可用，不要继续尝试其他查询**。
 
@@ -126,7 +148,7 @@ logcli_query() {
 
 **重要：如果 `logcli_query` 返回失败（exit code 非 0），必须立即停止所有后续查询，直接告知用户 Loki 不可用。**
 
-### 3. 参数说明
+### 4. 参数说明
 
 | 参数 | 说明 | 示例 |
 |------|------|------|
@@ -136,7 +158,7 @@ logcli_query() {
 | to | 结束时间（北京时间） | 2026-03-19T16:01:00 |
 | filter | 日志过滤关键字（正则） | NK202406131135101 |
 
-### 4. 多条件过滤
+### 5. 多条件过滤
 
 多个过滤条件使用多个 `|~` 串联（AND 关系）：
 
@@ -150,7 +172,7 @@ logcli_query() {
 '{namespace="test12",container="eq-alarm-service"} |~ "NK202406131135101" !~ "DEBUG"'
 ```
 
-### 5. LogQL 正则语法陷阱
+### 6. LogQL 正则语法陷阱
 
 **`|~` 使用 RE2 正则引擎，有以下限制：**
 
